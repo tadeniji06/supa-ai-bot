@@ -5,9 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "npx tsc",
+    "build": "node node_modules/typescript/bin/tsc",
     "start": "node dist/index.js",
-    "typecheck": "npx tsc --noEmit"
+    "typecheck": "node node_modules/typescript/bin/tsc --noEmit"
   },
   "dependencies": {
     "@solana/web3.js": "^1.98.4",
