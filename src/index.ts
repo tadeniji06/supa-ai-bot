@@ -105,4 +105,14 @@ bot.catch(err => {
 });
 
 console.log(`${config.APP_NAME} started. Leaders configured: ${leaders.length}. Live trading: ${config.LIVE_TRADING_ENABLED}`);
+
+import * as http from 'http';
+const port = process.env.PORT || 3000;
+http.createServer((req, res) => {
+  res.writeHead(200);
+  res.end('Bot is running');
+}).listen(port, () => {
+  console.log(`Dummy server listening on port ${port} to satisfy PaaS health checks`);
+});
+
 await bot.start();
