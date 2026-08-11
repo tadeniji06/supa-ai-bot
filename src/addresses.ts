@@ -1,6 +1,6 @@
 import { PublicKey, Keypair } from "@solana/web3.js";
 import { isAddress, isHex } from "viem";
-import { privateKeyToAccount } from "viem/accounts";
+import { privateKeyToAccount, generatePrivateKey } from "viem/accounts";
 import bs58 from "bs58";
 
 export function validateAddress(
@@ -48,4 +48,21 @@ export function extractAddress(
 	} catch {
 		return null;
 	}
+}
+
+export function generateSolanaWallet() {
+	const keypair = Keypair.generate();
+	return {
+		address: keypair.publicKey.toBase58(),
+		privateKey: bs58.encode(keypair.secretKey),
+	};
+}
+
+export function generateRobinhoodWallet() {
+	const privateKey = generatePrivateKey();
+	const account = privateKeyToAccount(privateKey);
+	return {
+		address: account.address,
+		privateKey,
+	};
 }

