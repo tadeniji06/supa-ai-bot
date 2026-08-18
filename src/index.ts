@@ -67,11 +67,16 @@ bot.callbackQuery('import_robinhood', async ctx => {
 bot.callbackQuery('generate_solana', async ctx => {
   await ctx.answerCallbackQuery();
   const wallet = generateSolanaWallet();
-  await User.findOneAndUpdate(
+  const newWallet = { address: wallet.address, privateKey: wallet.privateKey, chain: 'solana', isImported: false };
+  const u = await User.findOneAndUpdate(
     { chatId: String(ctx.chat?.id) },
-    { chatId: String(ctx.chat?.id), username: ctx.from?.username, walletAddress: wallet.address, privateKey: wallet.privateKey, chain: 'solana', lastSeenAt: new Date() },
+    { $setOnInsert: { chatId: String(ctx.chat?.id), username: ctx.from?.username }, $push: { wallets: newWallet }, $set: { lastSeenAt: new Date() } },
     { upsert: true, new: true }
   );
+  if (u.wallets.length > 0) {
+    u.activeWalletId = u.wallets[u.wallets.length - 1]._id;
+    await u.save();
+  }
   const msg = `✅ <b>Solana Wallet Generated! 🎉</b>\n\n<b>Public Address:</b>\n<code>${wallet.address}</code>\n\n<b>Private Key:</b> (SAVE THIS SOMEWHERE SAFE!)\n<code>${wallet.privateKey}</code>\n\n<i>(Tap to copy)</i>\n\nYour profile is now active. Fund your wallet to start copying!`;
   await ctx.reply(msg, { parse_mode: 'HTML', reply_markup: startKeyboard });
 });
@@ -79,11 +84,16 @@ bot.callbackQuery('generate_solana', async ctx => {
 bot.callbackQuery('generate_robinhood', async ctx => {
   await ctx.answerCallbackQuery();
   const wallet = generateRobinhoodWallet();
-  await User.findOneAndUpdate(
+  const newWallet = { address: wallet.address, privateKey: wallet.privateKey, chain: 'robinhood', isImported: false };
+  const u = await User.findOneAndUpdate(
     { chatId: String(ctx.chat?.id) },
-    { chatId: String(ctx.chat?.id), username: ctx.from?.username, walletAddress: wallet.address, privateKey: wallet.privateKey, chain: 'robinhood', lastSeenAt: new Date() },
+    { $setOnInsert: { chatId: String(ctx.chat?.id), username: ctx.from?.username }, $push: { wallets: newWallet }, $set: { lastSeenAt: new Date() } },
     { upsert: true, new: true }
   );
+  if (u.wallets.length > 0) {
+    u.activeWalletId = u.wallets[u.wallets.length - 1]._id;
+    await u.save();
+  }
   const msg = `✅ <b>Robinhood Wallet Generated! 🎉</b>\n\n<b>Public Address:</b>\n<code>${wallet.address}</code>\n\n<b>Private Key:</b> (SAVE THIS SOMEWHERE SAFE!)\n<code>${wallet.privateKey}</code>\n\n<i>(Tap to copy)</i>\n\nYour profile is now active. Fund your wallet to start copying!`;
   await ctx.reply(msg, { parse_mode: 'HTML', reply_markup: startKeyboard });
 });
@@ -91,12 +101,63 @@ bot.callbackQuery('generate_robinhood', async ctx => {
 bot.callbackQuery('profile', async ctx => {
   await ctx.answerCallbackQuery();
   const u = await User.findOne({ chatId: String(ctx.chat?.id) });
-  if (!u?.walletAddress) {
+  
+  const activeWallet = u?.wallets?.find(w => String(w._id) === String(u.activeWalletId)) || u?.wallets?.[0];
+  const fallbackAddress = u?.walletAddress;
+  const fallbackChain = u?.chain;
+
+  if (!activeWallet && !fallbackAddress) {
     return ctx.reply('❌ <b>No wallet connected yet.</b>\n\nPlease connect a wallet to view your profile.', { parse_mode: 'HTML', reply_markup: startKeyboard });
   }
-  const status = u.enabled ? '✅ Active' : '⏸ Paused';
-  const text = `👤 <b>Your Profile</b>\n\n<b>Chain:</b> ${u.chain === 'robinhood' ? 'Robinhood' : 'Solana'}\n<b>Address:</b> <code>${u.walletAddress}</code> (tap to copy)\n<b>Status:</b> ${status}\n<b>Copy Ratio:</b> ${u.copyRatio}x\n<b>Max Trade:</b> $${u.maxTradeUsd}\n\n<i>Stay active for upcoming airdrops! 🪂</i>`;
-  await ctx.reply(text, { parse_mode: 'HTML', reply_markup: startKeyboard });
+
+  const address = activeWallet ? activeWallet.address : fallbackAddress;
+  const chain = activeWallet ? activeWallet.chain : fallbackChain;
+
+  const status = u?.enabled ? '✅ Active' : '⏸ Paused';
+  const text = `👤 <b>Your Profile</b>\n\n<b>Chain:</b> ${chain === 'robinhood' ? 'Robinhood' : 'Solana'}\n<b>Active Wallet:</b> <code>${address}</code> (tap to copy)\n<b>Status:</b> ${status}\n<b>Copy Ratio:</b> ${u?.copyRatio}x\n<b>Max Trade:</b> $${u?.maxTradeUsd}\n\n<i>Stay active for upcoming airdrops! 🪂</i>`;
+  
+  const kb = new InlineKeyboard();
+  if (u && u.wallets && u.wallets.length > 0) {
+    kb.text('💳 Manage Wallets', 'manage_wallets').row();
+  }
+  kb.text('🟣 Connect Solana', 'connect_solana').text('🟢 Connect Robinhood', 'connect_robinhood').row()
+    .text('⚙️ Settings', 'settings');
+
+  await ctx.reply(text, { parse_mode: 'HTML', reply_markup: kb });
+});
+
+bot.callbackQuery('manage_wallets', async ctx => {
+  await ctx.answerCallbackQuery();
+  const u = await User.findOne({ chatId: String(ctx.chat?.id) });
+  if (!u || !u.wallets || u.wallets.length === 0) {
+    return ctx.reply('❌ <b>No wallets found.</b>', { parse_mode: 'HTML', reply_markup: startKeyboard });
+  }
+
+  const kb = new InlineKeyboard();
+  u.wallets.forEach((w, i) => {
+    const isActive = String(w._id) === String(u.activeWalletId);
+    const label = `${isActive ? '✅' : '⚪️'} ${w.chain === 'solana' ? 'Solana' : 'Robinhood'} - ${w.address.slice(0, 4)}...${w.address.slice(-4)}`;
+    kb.text(label, `select_wallet_${w._id}`).row();
+  });
+  kb.text('🔙 Back to Profile', 'profile');
+
+  await ctx.reply('💳 <b>Manage Wallets</b>\n\nSelect a wallet to make it active:', { parse_mode: 'HTML', reply_markup: kb });
+});
+
+bot.callbackQuery(/^select_wallet_(.+)$/, async ctx => {
+  await ctx.answerCallbackQuery();
+  const walletId = ctx.match[1];
+  const u = await User.findOne({ chatId: String(ctx.chat?.id) });
+  if (u && u.wallets) {
+    const exists = u.wallets.find(w => String(w._id) === walletId);
+    if (exists) {
+      u.activeWalletId = exists._id;
+      await u.save();
+      await ctx.reply(`✅ <b>Active wallet switched to ${exists.address}</b>`, { parse_mode: 'HTML', reply_markup: startKeyboard });
+      return;
+    }
+  }
+  await ctx.reply('❌ Wallet not found.', { reply_markup: startKeyboard });
 });
 
 bot.callbackQuery('settings', async ctx => {
@@ -135,11 +196,16 @@ bot.on('message:text', async (ctx, next) => {
       return ctx.reply(`❌ <b>Invalid ${chain === 'robinhood' ? 'Robinhood' : 'Solana'} private key or phrase.</b>\n\nPlease try again or use /cancel to go back.`, { parse_mode: 'HTML' });
     }
     
-    await User.findOneAndUpdate(
+    const newWallet = { address, privateKey: input, chain, isImported: true };
+    const u = await User.findOneAndUpdate(
       { chatId: String(ctx.chat?.id) },
-      { chatId: String(ctx.chat?.id), username: ctx.from?.username, walletAddress: address, privateKey: input, chain, lastSeenAt: new Date() },
+      { $setOnInsert: { chatId: String(ctx.chat?.id), username: ctx.from?.username }, $push: { wallets: newWallet }, $set: { lastSeenAt: new Date() } },
       { upsert: true, new: true }
     );
+    if (u.wallets.length > 0) {
+      u.activeWalletId = u.wallets[u.wallets.length - 1]._id;
+      await u.save();
+    }
     
     ctx.session.step = 'idle';
     const msg = `✅ <b>Wallet Connected Successfully! 🎉</b>\n\n<b>Chain:</b> ${chain === 'robinhood' ? 'Robinhood' : 'Solana'}\n<b>Public Address:</b>\n<code>${address}</code>\n\n<i>(Tap the address to copy it)</i>\n\nYour profile is now active. We're tracking your activity for exclusive airdrops! 🪂`;
